@@ -41,6 +41,28 @@ void McpServer::AddCommonTools() {
 
     // Do not add custom tools here.
     // Custom tools must be added in the board's InitializeTools function.
+    // 在 AddCommonTools() 函数里，加上这段代码：
+
+AddTool("user.control_light", 
+    "Control the smart light. Use this tool when the user wants to turn on or turn off the light.", // 给大模型看的提示词
+    PropertyList({
+        Property("action", kPropertyTypeString) // 告诉大模型，你需要传一个叫 action 的字符串参数
+    }), 
+    [](const PropertyList& properties) -> ReturnValue {
+        // 这是设备收到指令后实际执行的 C++ 代码
+        auto action = properties["action"].value<std::string>();
+        
+        if (action == "on") {
+            // gpio_set_level(GPIO_NUM_4, 1); // 假设你的灯接在 GPIO 4
+            ESP_LOGI("MCP", "大模型让我开灯！");
+        } else if (action == "off") {
+            // gpio_set_level(GPIO_NUM_4, 0);
+            ESP_LOGI("MCP", "大模型让我关灯！");
+        }
+        
+        // 返回 true 告诉大模型动作执行成功了，大模型接下来就会回复你“已经为你开/关灯”
+        return true; 
+    });
 
     AddTool("self.get_device_status",
         "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\n"

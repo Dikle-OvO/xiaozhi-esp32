@@ -20,6 +20,10 @@
 #define BUILTIN_LED_GPIO        GPIO_NUM_2
 #define BOOT_BUTTON_GPIO        GPIO_NUM_9
 
+// 显示屏选择: 注释下面这行使用SSD1306 OLED，取消注释使用ST7789V2 TFT
+#define USE_TFT_DISPLAY
+
+#ifdef USE_TFT_DISPLAY
 // ST7789V2 1.69" 240x280 SPI LCD
 #define LCD_SCLK_PIN    GPIO_NUM_0
 #define LCD_MOSI_PIN    GPIO_NUM_1
@@ -36,5 +40,12 @@
 #define DISPLAY_SWAP_XY false
 #define DISPLAY_OFFSET_X 0
 #define DISPLAY_OFFSET_Y 20
+#else
+// SSD1306 OLED 128x64
+#define DISPLAY_WIDTH   128
+#define DISPLAY_HEIGHT  64
+#define DISPLAY_MIRROR_X true
+#define DISPLAY_MIRROR_Y true
+#endif
 
 #endif // _BOARD_CONFIG_H_

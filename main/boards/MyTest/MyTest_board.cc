@@ -1,12 +1,16 @@
 #include "wifi_board.h"
 #include "codecs/es8311_audio_codec.h"
+#include "config.h"
+#ifdef USE_TFT_DISPLAY
 #include "display/lcd_display.h"
+#else
+#include "display/oled_display.h"
+#endif
 #include "application.h"
 #include "button.h"
 #include "led/single_led.h"
 #include "mcp_server.h"
 #include "settings.h"
-#include "config.h"
 #include "power_save_timer.h"
 #include "adc_battery_monitor.h"
 #include "press_to_talk_mcp_tool.h"
@@ -15,7 +19,9 @@
 #include <esp_log.h>
 #include <esp_efuse_table.h>
 #include <driver/i2c_master.h>
+#ifdef USE_TFT_DISPLAY
 #include <driver/spi_master.h>
+#endif
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 
@@ -81,6 +87,7 @@ private:
         }
     }
 
+#ifdef USE_TFT_DISPLAY
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num = LCD_MOSI_PIN;
@@ -145,6 +152,51 @@ private:
             DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
+#else
+    void InitializeSsd1306Display() {
+        // SSD1306 OLED屏幕的I2C通信配置
+        esp_lcd_panel_io_i2c_config_t io_config = {
+            .dev_addr = 0x3C,
+            .on_color_trans_done = nullptr,
+            .user_ctx = nullptr,
+            .control_phase_bytes = 1,
+            .dc_bit_offset = 6,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+            .flags = {
+                .dc_low_on_data = 0,
+                .disable_control_phase = 0,
+            },
+            .scl_speed_hz = 400 * 1000,
+        };
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
+
+        ESP_LOGI(TAG, "Install SSD1306 driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = -1;
+        panel_config.bits_per_pixel = 1;
+
+        esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+            .height = static_cast<uint8_t>(DISPLAY_HEIGHT),
+        };
+        panel_config.vendor_config = &ssd1306_config;
+
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
+        ESP_LOGI(TAG, "SSD1306 driver installed");
+
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+        if (esp_lcd_panel_init(panel_) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize display");
+            display_ = new NoDisplay();
+            return;
+        }
+
+        ESP_LOGI(TAG, "Turning display on");
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+
+        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+    }
+#endif
 
     void InitializeButtons() {
         // BOOT按钮点击事件处理
@@ -192,9 +244,13 @@ public:
         InitializePowerManager();       // 1. 启动电池监控和充电状态管理
         InitializePowerSaveTimer();     // 2. 配置功耗节省定时器
         InitializeCodecI2c();           // 3. 初始化I2C总线与音频编码器通信
+#ifdef USE_TFT_DISPLAY
         InitializeSpi();                // 4. 初始化SPI总线
         InitializeSt7789Display();      // 5. 初始化ST7789V2 LCD屏幕驱动
-        InitializeButtons();            // 5. 配置按钮事件处理
+#else
+        InitializeSsd1306Display();     // 4. 初始化SSD1306 OLED屏幕驱动
+#endif
+        InitializeButtons();            // 6. 配置按钮事件处理
         InitializeTools();              // 6. 初始化语音对话工具
     }
 

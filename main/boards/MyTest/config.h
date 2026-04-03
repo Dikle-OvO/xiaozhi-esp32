@@ -20,9 +20,21 @@
 #define BUILTIN_LED_GPIO        GPIO_NUM_2
 #define BOOT_BUTTON_GPIO        GPIO_NUM_9
 
-#define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  64
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
+// ST7789V2 1.69" 240x280 SPI LCD
+#define LCD_SCLK_PIN    GPIO_NUM_0
+#define LCD_MOSI_PIN    GPIO_NUM_1
+#define LCD_MISO_PIN    GPIO_NUM_NC
+#define LCD_CS_PIN      GPIO_NUM_13
+#define LCD_DC_PIN      GPIO_NUM_18
+#define LCD_RST_PIN     GPIO_NUM_19
+#define LCD_BL_PIN      GPIO_NUM_20
+
+#define DISPLAY_WIDTH   240
+#define DISPLAY_HEIGHT  280
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
+#define DISPLAY_SWAP_XY false
+#define DISPLAY_OFFSET_X 0
+#define DISPLAY_OFFSET_Y 20
 
 #endif // _BOARD_CONFIG_H_

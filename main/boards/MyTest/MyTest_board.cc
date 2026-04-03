@@ -1,6 +1,6 @@
 #include "wifi_board.h"
 #include "codecs/es8311_audio_codec.h"
-#include "display/oled_display.h"
+#include "display/lcd_display.h"
 #include "application.h"
 #include "button.h"
 #include "led/single_led.h"
@@ -15,6 +15,7 @@
 #include <esp_log.h>
 #include <esp_efuse_table.h>
 #include <driver/i2c_master.h>
+#include <driver/spi_master.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 
@@ -80,57 +81,69 @@ private:
         }
     }
 
-    void InitializeSsd1306Display() {
-        // SSD1306 OLED屏幕的I2C通信配置
-        esp_lcd_panel_io_i2c_config_t io_config = {
-            .dev_addr = 0x3C,                           // SSD1306的I2C地址
-            .on_color_trans_done = nullptr,             // 无颜色传输完成回调
-            .user_ctx = nullptr,                        // 用户上下文指针
-            .control_phase_bytes = 1,                   // 控制字节数
-            .dc_bit_offset = 6,                         // 数据/命令标志位偏移
-            .lcd_cmd_bits = 8,                          // 命令位宽度
-            .lcd_param_bits = 8,                        // 参数位宽度
-            .flags = {
-                .dc_low_on_data = 0,                    // DC低电平表示数据
-                .disable_control_phase = 0,             // 不禁用控制阶段
-            },
-            .scl_speed_hz = 400 * 1000,                 // I2C时钟频率400kHz
-        };
+    void InitializeSpi() {
+        spi_bus_config_t buscfg = {};
+        buscfg.mosi_io_num = LCD_MOSI_PIN;
+        buscfg.miso_io_num = LCD_MISO_PIN;
+        buscfg.sclk_io_num = LCD_SCLK_PIN;
+        buscfg.quadwp_io_num = GPIO_NUM_NC;
+        buscfg.quadhd_io_num = GPIO_NUM_NC;
+        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    }
 
-        // 为SSD1306创建I2C接口
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
+    void InitializeSt7789Display() {
+        // SPI接口配置
+        esp_lcd_panel_io_spi_config_t io_config = {};
+        io_config.cs_gpio_num = LCD_CS_PIN;
+        io_config.dc_gpio_num = LCD_DC_PIN;
+        io_config.spi_mode = 0;
+        io_config.pclk_hz = 40 * 1000 * 1000;          // SPI时钟40MHz
+        io_config.trans_queue_depth = 10;
+        io_config.lcd_cmd_bits = 8;
+        io_config.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io_));
 
-        ESP_LOGI(TAG, "Install SSD1306 driver");
+        ESP_LOGI(TAG, "Install ST7789V2 driver");
         // LCD面板驱动配置
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = -1;              // 无重置GPIO（硬件不支持或已外部处理）
-        panel_config.bits_per_pixel = 1;               // 单色显示（1比特/像素）
+        panel_config.reset_gpio_num = LCD_RST_PIN;
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+        panel_config.bits_per_pixel = 16;               // RGB565
+        panel_config.data_endian = LCD_RGB_DATA_ENDIAN_BIG;
 
-        // SSD1306特定配置
-        esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-            .height = static_cast<uint8_t>(DISPLAY_HEIGHT),  // 屏幕高度（通常64像素）
-        };
-        panel_config.vendor_config = &ssd1306_config;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io_, &panel_config, &panel_));
 
-        // 创建SSD1306驱动实例
-        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
-        ESP_LOGI(TAG, "SSD1306 driver installed");
-
-        // 重置显示屏
+        // 重置并初始化显示屏
         ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-        // 初始化显示屏硬件，失败时使用虚拟显示代替
         if (esp_lcd_panel_init(panel_) != ESP_OK) {
             ESP_LOGE(TAG, "Failed to initialize display");
-            display_ = new NoDisplay();  // 创建虚拟显示对象，确保程序继续运行
+            display_ = new NoDisplay();
             return;
         }
 
-        // 启动显示屏
-        ESP_LOGI(TAG, "Turning display on");
+        // ST7789需要反转颜色
+        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
+        ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_, DISPLAY_SWAP_XY));
+        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
-        // 创建OLED显示抽象层实例，配置镜像模式
-        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        // 配置背光引脚
+        gpio_config_t bl_gpio_config = {
+            .pin_bit_mask = 1ULL << LCD_BL_PIN,
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&bl_gpio_config));
+        gpio_set_level(LCD_BL_PIN, 1);                  // 打开背光
+
+        // 创建SPI LCD显示抽象层实例
+        display_ = new SpiLcdDisplay(panel_io_, panel_,
+            DISPLAY_WIDTH, DISPLAY_HEIGHT,
+            DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
     void InitializeButtons() {
@@ -179,7 +192,8 @@ public:
         InitializePowerManager();       // 1. 启动电池监控和充电状态管理
         InitializePowerSaveTimer();     // 2. 配置功耗节省定时器
         InitializeCodecI2c();           // 3. 初始化I2C总线与音频编码器通信
-        InitializeSsd1306Display();     // 4. 初始化OLED屏幕驱动
+        InitializeSpi();                // 4. 初始化SPI总线
+        InitializeSt7789Display();      // 5. 初始化ST7789V2 LCD屏幕驱动
         InitializeButtons();            // 5. 配置按钮事件处理
         InitializeTools();              // 6. 初始化语音对话工具
     }

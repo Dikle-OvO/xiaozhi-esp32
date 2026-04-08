@@ -63,6 +63,37 @@ Inmp441AudioCodec::Inmp441AudioCodec(int input_sample_rate, int output_sample_ra
     };
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
     ESP_LOGI(TAG, "INMP441 RX channel created");
+
+    // 检测 INMP441 是否实际连接：读取数据检查是否非零且有波动
+    ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+    const int check_samples = 256;
+    std::vector<int32_t> check_buf(check_samples, 0);
+    size_t bytes_read = 0;
+    bool mic_detected = false;
+    for (int retry = 0; retry < 3 && !mic_detected; retry++) {
+        i2s_channel_read(rx_handle_, check_buf.data(), check_samples * sizeof(int32_t), &bytes_read, pdMS_TO_TICKS(200));
+        int total = bytes_read / sizeof(int32_t);
+        if (total == 0) continue;
+        int nonzero_count = 0;
+        int32_t min_val = check_buf[0], max_val = check_buf[0];
+        for (int i = 0; i < total; i++) {
+            if (check_buf[i] != 0) nonzero_count++;
+            if (check_buf[i] < min_val) min_val = check_buf[i];
+            if (check_buf[i] > max_val) max_val = check_buf[i];
+        }
+        // 麦克风正常工作：大部分数据非零，且有一定波动（不是恒定值）
+        if (nonzero_count > total / 2 && max_val != min_val) {
+            mic_detected = true;
+        }
+        ESP_LOGI(TAG, "Retry %d: total=%d, nonzero=%d, min=0x%08lX, max=0x%08lX",
+                 retry, total, nonzero_count, (unsigned long)min_val, (unsigned long)max_val);
+    }
+    ESP_ERROR_CHECK(i2s_channel_disable(rx_handle_));
+    if (mic_detected) {
+        ESP_LOGI(TAG, "INMP441 microphone detected");
+    } else {
+        ESP_LOGW(TAG, "INMP441 microphone NOT detected, check wiring!");
+    }
 }
 
 Inmp441AudioCodec::~Inmp441AudioCodec() {

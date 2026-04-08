@@ -1,5 +1,5 @@
 #include "wifi_board.h"
-#include "codecs/es8311_audio_codec.h"
+#include "codecs/inmp441_audio_codec.h"
 #include "config.h"
 #ifdef USE_TFT_DISPLAY
 #include "display/lcd_display.h"
@@ -18,7 +18,9 @@
 #include <wifi_manager.h>
 #include <esp_log.h>
 #include <esp_efuse_table.h>
+#ifndef USE_TFT_DISPLAY
 #include <driver/i2c_master.h>
+#endif
 #ifdef USE_TFT_DISPLAY
 #include <driver/spi_master.h>
 #endif
@@ -29,7 +31,9 @@
 
 class MyTest : public WifiBoard {
 private:
+#ifndef USE_TFT_DISPLAY
     i2c_master_bus_handle_t codec_i2c_bus_;
+#endif
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
     Display* display_ = nullptr;
@@ -60,32 +64,24 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
-    void InitializeCodecI2c() {
-        // I2C总线配置结构体，定义硬件参数
+#ifndef USE_TFT_DISPLAY
+    void InitializeI2c() {
+        // I2C总线配置结构体，仅用于SSD1306 OLED屏幕
         i2c_master_bus_config_t i2c_bus_cfg = {
-            .i2c_port = I2C_NUM_0,                      // 使用I2C端口0
-            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,      // SDA数据线GPIO编号
-            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,      // SCL时钟线GPIO编号
-            .clk_source = I2C_CLK_SRC_DEFAULT,          // 使用默认时钟源
-            .glitch_ignore_cnt = 7,                     // 毛刺忽略计数（抗干扰）
-            .intr_priority = 0,                         // 中断优先级
-            .trans_queue_depth = 0,                     // 传输队列深度（0=自动）
+            .i2c_port = I2C_NUM_0,
+            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
+            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
             .flags = {
-                .enable_internal_pullup = 1,            // 启用内部上拉电阻
+                .enable_internal_pullup = 1,
             },
         };
-        // 创建并初始化I2C总线
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
-
-        // 扫描I2C总线上地址0x18的设备（ES8311音频编码器），超时1000ms
-        if (i2c_master_probe(codec_i2c_bus_, 0x18, 1000) != ESP_OK) {
-            // 如果探测失败，说明硬件连接有问题，循环输出错误日志
-            while (true) {
-                ESP_LOGE(TAG, "Failed to probe I2C bus, please check if you have installed the correct firmware");
-                vTaskDelay(1000 / portTICK_PERIOD_MS);
-            }
-        }
     }
+#endif
 
 #ifdef USE_TFT_DISPLAY
     void InitializeSpi() {
@@ -243,11 +239,11 @@ public:
     MyTest() : boot_button_(BOOT_BUTTON_GPIO, false, 0, 0, true) {  
         InitializePowerManager();       // 1. 启动电池监控和充电状态管理
         InitializePowerSaveTimer();     // 2. 配置功耗节省定时器
-        InitializeCodecI2c();           // 3. 初始化I2C总线与音频编码器通信
 #ifdef USE_TFT_DISPLAY
-        InitializeSpi();                // 4. 初始化SPI总线
-        InitializeSt7789Display();      // 5. 初始化ST7789V2 LCD屏幕驱动
+        InitializeSpi();                // 3. 初始化SPI总线
+        InitializeSt7789Display();      // 4. 初始化ST7789V2 LCD屏幕驱动
 #else
+        InitializeI2c();                // 3. 初始化I2C总线（仅用于SSD1306）
         InitializeSsd1306Display();     // 4. 初始化SSD1306 OLED屏幕驱动
 #endif
         InitializeButtons();            // 6. 配置按钮事件处理
@@ -265,11 +261,10 @@ public:
         return display_;
     }
 
-    // 获取音频编码解码器实例，配置采样率、GPIO映射和编码器地址
+    // 获取音频编码解码器实例（INMP441 仅麦克风输入，无功放输出）
     virtual AudioCodec* GetAudioCodec() override {
-        static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);  // 注：PA_PIN为功放引脚，ES8311_ADDR为I2C芯片地址(0x18)
+        static Inmp441AudioCodec audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DIN, I2S_STD_SLOT_LEFT);
         return &audio_codec;
     }
 

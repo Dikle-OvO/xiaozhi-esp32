@@ -19,6 +19,4 @@
 // 无显示屏
 #define NO_DISPLAY
 
-
-
 #endif // _BOARD_CONFIG_H_

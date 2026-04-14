@@ -44,9 +44,11 @@ void McpServer::AddCommonTools() {
     // 在 AddCommonTools() 函数里，加上这段代码：
 
 AddTool("user.control_light", 
-    "Control the smart light. Use this tool when the user wants to turn on or turn off the light.", // 给大模型看的提示词
+    "Control the smart light. Use this tool when the user wants to turn on or turn off the light.\n"
+    "Args:\n"
+    "  `action`: Must be `on` to turn on the light, or `off` to turn off the light.",
     PropertyList({
-        Property("action", kPropertyTypeString) // 告诉大模型，你需要传一个叫 action 的字符串参数
+        Property("action", kPropertyTypeString)
     }), 
     [](const PropertyList& properties) -> ReturnValue {
         // 这是设备收到指令后实际执行的 C++ 代码

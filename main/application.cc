@@ -743,6 +743,11 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
         digit_sound{'9', Lang::Sounds::OGG_9}
     }};
 
+    ESP_LOGW(TAG, "\n\n========================================");
+    ESP_LOGW(TAG, "  Activation Code: %s", code.c_str());
+    ESP_LOGW(TAG, "  Visit: %s", message.c_str());
+    ESP_LOGW(TAG, "========================================\n");
+
     // This sentence uses 9KB of SRAM, so we need to wait for it to finish
     Alert(Lang::Strings::ACTIVATION, message.c_str(), "link", Lang::Sounds::OGG_ACTIVATION);
 

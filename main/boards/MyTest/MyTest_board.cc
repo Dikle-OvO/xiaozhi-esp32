@@ -103,19 +103,19 @@ private:
             uart_write_bytes(UART_NUM_0, "@LED1_OFF\r\n", strlen("@LED1_OFF\r\n"));
             vTaskDelay(pdMS_TO_TICKS(20));
             ESP_LOGI(TAG, "Bemfa: 关灯");
-        } else if (payload == "1") {
+        } else if (payload == "亮度1级") {
             uart_write_bytes(UART_NUM_0, "@LED1_BRI 3000\r\n", strlen("@LED1_BRI 3000\r\n"));
             vTaskDelay(pdMS_TO_TICKS(20));
             uart_write_bytes(UART_NUM_0, "@LED2_BRI 3000\r\n", strlen("@LED2_BRI 3000\r\n"));
             vTaskDelay(pdMS_TO_TICKS(20));
             ESP_LOGI(TAG, "Bemfa: 亮度1级");
-        } else if (payload == "2") {
+        } else if (payload == "亮度2级") {
             uart_write_bytes(UART_NUM_0, "@LED1_BRI 10000\r\n", strlen("@LED1_BRI 10000\r\n"));
             vTaskDelay(pdMS_TO_TICKS(20));
             uart_write_bytes(UART_NUM_0, "@LED2_BRI 10000\r\n", strlen("@LED2_BRI 10000\r\n"));
             vTaskDelay(pdMS_TO_TICKS(20));
             ESP_LOGI(TAG, "Bemfa: 亮度2级");
-        } else if (payload == "3") {
+        } else if (payload == "亮度3级") {
             uart_write_bytes(UART_NUM_0, "@LED1_BRI 40000\r\n", strlen("@LED1_BRI 40000\r\n"));
             vTaskDelay(pdMS_TO_TICKS(20));
             uart_write_bytes(UART_NUM_0, "@LED2_BRI 40000\r\n", strlen("@LED2_BRI 40000\r\n"));

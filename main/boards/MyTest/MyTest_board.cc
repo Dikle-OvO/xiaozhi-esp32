@@ -32,7 +32,7 @@ private:
             if (is_charging) {
                 power_save_timer_->SetEnabled(false);
             } else {
-                power_save_timer_->SetEnabled(true);
+                power_save_timer_->SetEnabled(false);//关闭省电模式，保持常亮以便语音唤醒
             }
         });// lambda表达式：匿名函数
     }
@@ -45,7 +45,7 @@ private:
         power_save_timer_->OnExitSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(false);
         });
-        power_save_timer_->SetEnabled(true);
+        power_save_timer_->SetEnabled(false);//关闭省电模式，保持常亮以便语音唤醒
     }
 
 
@@ -139,7 +139,7 @@ public:
     // 构造函数：初始化BOOT按钮（GPIO3，低电平触发，内部上拉）并依次初始化各子系统
     MyTest() : boot_button_(BOOT_BUTTON_GPIO, false, 0, 0, true) {  
         // InitializePowerManager();       // 1. 启动电池监控和充电状态管理（GPIO12 让给 UART）
-        // InitializePowerSaveTimer();     // 2. 配置功耗节省定时器（禁用以保持语音唤醒常开）
+        InitializePowerSaveTimer();     // 2. 配置功耗节省定时器
         display_ = new NoDisplay();     // 3. 无显示屏
         InitializeButtons();            // 4. 配置按钮事件处理
         InitializeTools();              // 5. 初始化语音对话工具

@@ -14,7 +14,9 @@
 #include <wifi_manager.h>
 #include <esp_log.h>
 #include <esp_efuse_table.h>
+#include <esp_netif.h>
 #include <driver/uart.h>
+#include <mqtt.h>
 
 #define TAG "MyTest"
 
@@ -25,6 +27,7 @@ private:
     PowerSaveTimer* power_save_timer_ = nullptr;
     AdcBatteryMonitor* adc_battery_monitor_ = nullptr;
     PressToTalkMcpTool* press_to_talk_tool_ = nullptr;
+    std::unique_ptr<Mqtt> bemfa_mqtt_;
 
     void InitializePowerManager() {
         adc_battery_monitor_ = new AdcBatteryMonitor(ADC_UNIT_1, ADC_CHANNEL_3, 100000, 100000, GPIO_NUM_12);
@@ -84,6 +87,90 @@ private:
         });
     }
 
+    static void HandleBemfaCommand(const std::string& payload) {
+        if (payload == "开灯") {
+            uart_write_bytes(UART_NUM_0, "@LED2_ON\r\n", strlen("@LED2_ON\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uart_write_bytes(UART_NUM_0, "@LED1_ON\r\n", strlen("@LED1_ON\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uart_write_bytes(UART_NUM_0, "@LED1_UP\r\n", strlen("@LED1_UP\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uart_write_bytes(UART_NUM_0, "@LED2_UP\r\n", strlen("@LED2_UP\r\n"));
+            ESP_LOGI(TAG, "Bemfa: 开灯");
+        } else if (payload == "关灯") {
+            uart_write_bytes(UART_NUM_0, "@LED2_OFF\r\n", strlen("@LED2_OFF\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uart_write_bytes(UART_NUM_0, "@LED1_OFF\r\n", strlen("@LED1_OFF\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            ESP_LOGI(TAG, "Bemfa: 关灯");
+        } else if (payload == "1") {
+            uart_write_bytes(UART_NUM_0, "@LED1_BRI 3000\r\n", strlen("@LED1_BRI 3000\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uart_write_bytes(UART_NUM_0, "@LED2_BRI 3000\r\n", strlen("@LED2_BRI 3000\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            ESP_LOGI(TAG, "Bemfa: 亮度1级");
+        } else if (payload == "2") {
+            uart_write_bytes(UART_NUM_0, "@LED1_BRI 10000\r\n", strlen("@LED1_BRI 10000\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uart_write_bytes(UART_NUM_0, "@LED2_BRI 10000\r\n", strlen("@LED2_BRI 10000\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            ESP_LOGI(TAG, "Bemfa: 亮度2级");
+        } else if (payload == "3") {
+            uart_write_bytes(UART_NUM_0, "@LED1_BRI 40000\r\n", strlen("@LED1_BRI 40000\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uart_write_bytes(UART_NUM_0, "@LED2_BRI 40000\r\n", strlen("@LED2_BRI 40000\r\n"));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            ESP_LOGI(TAG, "Bemfa: 亮度3级");
+        } else {
+            ESP_LOGW(TAG, "Bemfa: unknown command: %s", payload.c_str());
+        }
+    }
+
+    void InitializeBemfaMqtt() {
+        // 在后台任务中等待网络就绪后再连接 MQTT
+        xTaskCreate([](void* arg) {
+            auto self = (MyTest*)arg;
+
+            // 等待 WiFi 获取到 IP 地址（TCP/IP 协议栈完全就绪）
+            while (true) {
+                esp_netif_ip_info_t ip_info = {};
+                esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+                if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(2000));
+            }
+            ESP_LOGI(TAG, "WiFi IP ready, creating Bemfa MQTT client...");
+
+            auto network = Board::GetInstance().GetNetwork();
+            self->bemfa_mqtt_ = network->CreateMqtt();
+            self->bemfa_mqtt_->OnConnected([self]() {
+                ESP_LOGI(TAG, "Bemfa MQTT connected");
+                self->bemfa_mqtt_->Subscribe("Flag", 0);
+            });
+            self->bemfa_mqtt_->OnDisconnected([]() {
+                ESP_LOGW(TAG, "Bemfa MQTT disconnected");
+            });
+            self->bemfa_mqtt_->OnMessage([](const std::string& topic, const std::string& payload) {
+                ESP_LOGI(TAG, "Bemfa msg [%s]: %s", topic.c_str(), payload.c_str());
+                HandleBemfaCommand(payload);
+            });
+
+            // 循环尝试连接，Connect 内部有 10s 超时，WiFi 没连上会自动失败重试
+            while (true) {
+                ESP_LOGI(TAG, "Trying to connect Bemfa MQTT...");
+                bool ok = self->bemfa_mqtt_->Connect("bemfa.com", 9501, "c686a8f18c5da4f19adfe645b7589e42", "", "");
+                if (ok) {
+                    ESP_LOGI(TAG, "Bemfa MQTT connect success");
+                    break;
+                }
+                ESP_LOGW(TAG, "Bemfa MQTT connect failed, retry in 5s...");
+                vTaskDelay(pdMS_TO_TICKS(5000));
+            }
+            vTaskDelete(NULL);
+        }, "bemfa_mqtt", 4096, this, 3, NULL);
+    }
+
     void InitializeTools() {
         // 创建并初始化语音对话工具（按键唤醒模式）
         press_to_talk_tool_ = new PressToTalkMcpTool();
@@ -110,14 +197,16 @@ private:
         // 注册开关灯工具，触发时通过串口通知
         auto& mcp = McpServer::GetInstance();
         mcp.AddTool("user.control_light",
-            "ontrol the smart light. MUST use this tool to turn the light on or off. The 'action' parameter MUST be exactly 'on' or 'off'.",
+            "Control the smart light. MUST use this tool to turn the light on, off, turn up (brighten), or turn down (dim). The 'action' parameter MUST be exactly one of: 'on', 'off', 'up', or 'down'.",
             PropertyList({
                 Property("action", kPropertyTypeString)
             }),
             [](const PropertyList& properties) -> ReturnValue {
                 auto action = properties["action"].value<std::string>();
+                
+                // 1. 开灯动作 (保留了你开灯后顺便拉高亮度的逻辑)
                 if (action == "on" || action == "turn_on" || action == "open") {
-                    ESP_LOGI(TAG, "开灯，发送串口通知");
+                    ESP_LOGI(TAG, "🤖 执行指令：开灯");
                     uart_write_bytes(UART_NUM_0, "@LED2_ON\r\n", strlen("@LED2_ON\r\n"));
                     vTaskDelay(pdMS_TO_TICKS(20));
                     uart_write_bytes(UART_NUM_0, "@LED1_ON\r\n", strlen("@LED1_ON\r\n"));
@@ -125,12 +214,35 @@ private:
                     uart_write_bytes(UART_NUM_0, "@LED1_UP\r\n", strlen("@LED1_UP\r\n"));
                     vTaskDelay(pdMS_TO_TICKS(20));
                     uart_write_bytes(UART_NUM_0, "@LED2_UP\r\n", strlen("@LED2_UP\r\n"));
-                } else if (action == "off" || action == "turn_off" || action == "close") {
-                    ESP_LOGI(TAG, "关灯，发送串口通知");
+                } 
+                // 2. 关灯动作
+                else if (action == "off" || action == "turn_off" || action == "close") {
+                    ESP_LOGI(TAG, "🤖 执行指令：关灯");
                     uart_write_bytes(UART_NUM_0, "@LED2_OFF\r\n", strlen("@LED2_OFF\r\n"));
                     vTaskDelay(pdMS_TO_TICKS(20));
                     uart_write_bytes(UART_NUM_0, "@LED1_OFF\r\n", strlen("@LED1_OFF\r\n"));
                 }
+                // 3. 调亮动作
+                else if (action == "up" || action == "turn_up" || action == "brighten" || action == "brighter") {
+                    ESP_LOGI(TAG, "🤖 执行指令：调亮");
+                    uart_write_bytes(UART_NUM_0, "@LED2_UP\r\n", strlen("@LED2_UP\r\n"));
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    uart_write_bytes(UART_NUM_0, "@LED1_UP\r\n", strlen("@LED1_UP\r\n"));
+                }
+                // 4. 调暗动作
+                else if (action == "down" || action == "turn_down" || action == "dim" || action == "dimmer") {
+                    ESP_LOGI(TAG, "🤖 执行指令：调暗");
+                    // 这里假设你的下位机调暗指令是 _DOWN，请根据实际情况修改
+                    uart_write_bytes(UART_NUM_0, "@LED2_DOWN\r\n", strlen("@LED2_DOWN\r\n"));
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    uart_write_bytes(UART_NUM_0, "@LED1_DOWN\r\n", strlen("@LED1_DOWN\r\n"));
+                } 
+                // 5. 异常处理兜底
+                else {
+                    ESP_LOGW(TAG, "❌ 收到未知的灯光指令: %s", action.c_str());
+                    return false; // 返回 false，大模型会知道自己调用错了
+                }
+                
                 return true;
             });
     }
@@ -143,6 +255,7 @@ public:
         display_ = new NoDisplay();     // 3. 无显示屏
         InitializeButtons();            // 4. 配置按钮事件处理
         InitializeTools();              // 5. 初始化语音对话工具
+        InitializeBemfaMqtt();          // 6. 连接巴法云 MQTT
     }
 
     // 获取LED驱动实例，使用单色LED（GPIO2）

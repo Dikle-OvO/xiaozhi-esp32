@@ -110,6 +110,7 @@ public:
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
+    int AddStateChangeListener(DeviceStateMachine::StateCallback callback) { return state_machine_.AddStateChangeListener(std::move(callback)); }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
     

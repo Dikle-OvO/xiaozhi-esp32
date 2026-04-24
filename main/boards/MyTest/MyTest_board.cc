@@ -256,6 +256,19 @@ public:
         InitializeButtons();            // 4. 配置按钮事件处理
         InitializeTools();              // 5. 初始化语音对话工具
         InitializeBemfaMqtt();          // 6. 连接巴法云 MQTT
+
+        // 7. 监听设备状态变化，通过 UART0 发送提示
+        Application::GetInstance().AddStateChangeListener([](DeviceState old_state, DeviceState new_state) {
+            if (new_state == kDeviceStateListening) {
+                const char* msg = "@INFO:Listening start\r\n";
+                uart_write_bytes(UART_NUM_0, msg, strlen(msg));
+                ESP_LOGI(TAG, "State -> Listening, sent UART notify");
+            } else if (old_state == kDeviceStateListening && new_state != kDeviceStateListening) {
+                const char* msg = "@INFO:Listening stop\r\n";
+                uart_write_bytes(UART_NUM_0, msg, strlen(msg));
+                ESP_LOGI(TAG, "State Listening ->, sent UART notify");
+            }
+        });
     }
 
     // 获取LED驱动实例，使用单色LED（GPIO2）
